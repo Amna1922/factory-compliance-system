@@ -234,3 +234,36 @@ def show_mock_timeline():
         {"timestamp": datetime.now() - timedelta(minutes=5), "severity": "HIGH", "behavior_class": "Safe Walkway Violation", "event_description": "Person outside green markings"},
         {"timestamp": datetime.now() - timedelta(minutes=12), "severity": "CRITICAL", "behavior_class": "Carrying Overload with Forklift", "event_description": "Forklift carrying 4 blocks"},
         {"timestamp": datetime.now() - timedelta(minutes=23), "severity": "MEDIUM", "behavior_class": "Unauthorized Intervention", "event_description": "Person near equipment without green vest"},
+    ]
+    
+    for event in mock_events:
+        color = {
+            "LOW": "#28a745",
+            "MEDIUM": "#ffc107",
+            "HIGH": "#fd7e14",
+            "CRITICAL": "#dc3545"
+        }.get(event['severity'], "#6c757d")
+        
+        st.markdown(f"""
+        <div style="border-left: 4px solid {color}; padding: 10px; margin: 5px 0; background-color: #f8f9fa;">
+            <strong>{event['timestamp'].strftime('%H:%M:%S')}</strong> - 
+            <span style="color: {color}; font-weight: bold;">{event['severity']}</span> - 
+            {event['behavior_class']}<br>
+            <small>{event['event_description']}</small>
+        </div>
+        """, unsafe_allow_html=True)
+
+def show_mock_history():
+    """Show mock historical data"""
+    mock_data = {
+        "Event ID": ["EVT001", "EVT002", "EVT003"],
+        "Timestamp": ["2026-01-15T10:30:00Z", "2026-01-15T10:15:00Z", "2026-01-15T09:45:00Z"],
+        "Zone": ["Zone-1", "Zone-2", "Zone-1"],
+        "Behavior": ["Walkway Violation", "Forklift Overload", "Panel Open"],
+        "Severity": ["HIGH", "CRITICAL", "LOW"]
+    }
+    df = pd.DataFrame(mock_data)
+    st.dataframe(df)
+
+if __name__ == "__main__":
+    main()
