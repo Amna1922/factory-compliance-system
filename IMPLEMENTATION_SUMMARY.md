@@ -88,7 +88,7 @@ A complete, production-ready Factory Compliance & Alert Escalation System has be
     - CORS enabled for dashboard
     - Complete error handling
 
-11. ****init**.py** - Package initialization
+11. \***\*init**.py\*\* - Package initialization
 
 #### Frontend Application (frontend/)
 
@@ -113,7 +113,7 @@ A complete, production-ready Factory Compliance & Alert Escalation System has be
     - Filter sections
     - API client for backend communication
 
-14. ****init**.py** - Package initialization
+14. \***\*init**.py\*\* - Package initialization
 
 #### Configuration Files
 
