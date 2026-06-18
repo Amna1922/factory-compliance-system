@@ -6,6 +6,8 @@ from typing import List, Dict, Any
 import json
 from datetime import datetime
 import uuid
+import tempfile
+import shutil
 
 from .config import settings
 from .models import ViolationEvent, SeverityLevel
@@ -14,10 +16,11 @@ from .detection_engine import DetectionEngine
 from .severity_classifier import SeverityClassifier
 from .escalation_pipeline import EscalationPipeline
 from .report_generator import ReportGenerator
+from .utils import data_loader
 
 app = FastAPI(title="Factory Compliance System")
 
-# CORS middleware for frontend
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,50 +36,80 @@ severity_classifier = SeverityClassifier()
 escalation_pipeline = EscalationPipeline()
 report_generator = ReportGenerator()
 
-# WebSocket connections for real-time alerts
+# WebSocket connections
 active_connections: List[WebSocket] = []
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database and load models"""
     await db.initialize()
-    print("Factory Compliance System started successfully")
+    print("🚀 Factory Compliance System started successfully")
+    print(f"📁 Dataset location: {settings.DATASET_DIR}")
+    
+    # Print dataset statistics
+    stats = data_loader.get_statistics()
+    print("\n📊 Dataset Statistics:")
+    for split in ["train", "test"]:
+        print(f"  {split.upper()}:")
+        print(f"    Total: {stats[split]['total']} videos")
+        print(f"    Unsafe: {stats[split]['unsafe']} videos")
+        print(f"    Safe: {stats[split]['safe']} videos")
+        if "class_counts" in stats[split]:
+            print("    Class distribution:")
+            for class_name, count in stats[split]["class_counts"].items():
+                print(f"      - {class_name}: {count}")
 
-@app.post("/analyze-video")
-async def analyze_video(file: UploadFile = File(...)):
-    """
-    Endpoint to upload and analyze a video clip
-    """
-    try:
-        # Save uploaded video
-        video_path = f"data/videos/{file.filename}"
-        with open(video_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+@app.get("/dataset/stats")
+async def get_dataset_stats():
+    """Get dataset statistics"""
+    stats = data_loader.get_statistics()
+    return JSONResponse(stats)
+
+@app.get("/dataset/videos/{split}")
+async def get_videos(split: str = "train", unsafe_only: bool = False):
+    """Get list of videos"""
+    if split not in ["train", "test"]:
+        return JSONResponse({"error": "Split must be 'train' or 'test'"}, status_code=400)
+    
+    if unsafe_only:
+        videos = data_loader.get_unsafe_videos(split)
+    else:
+        videos = data_loader.get_all_videos(split)
+    
+    return JSONResponse({"count": len(videos), "videos": videos[:10]})  # Return first 10
+
+@app.post("/analyze-batch")
+async def analyze_batch(split: str = "test", max_videos: int = 10):
+    """Analyze a batch of videos from the dataset"""
+    unsafe_videos = data_loader.get_unsafe_videos(split)[:max_videos]
+    
+    if not unsafe_videos:
+        return JSONResponse({"error": "No videos found"}, status_code=404)
+    
+    events = []
+    for video_info in unsafe_videos:
+        # Process video
+        detection = await detection_engine.process_video_file(video_info["path"])
         
-        # Process video through detection engine
-        detections = await detection_engine.process_video(video_path)
-        
-        # Process each detection
-        events = []
-        for detection in detections:
-            # Classify severity
-            severity = severity_classifier.classify(detection)
-            
+        if detection.get("violation_detected", False):
             # Create event
             event = ViolationEvent(
                 event_id=str(uuid.uuid4()),
                 timestamp=datetime.utcnow().isoformat() + "Z",
-                clip_id=file.filename,
+                clip_id=Path(video_info["path"]).name,
                 zone=detection.get("zone", "Unknown"),
                 behavior_class=detection["behavior_class"],
-                policy_rule_ref=detection["policy_rule_ref"],
+                policy_rule_ref=detection.get("policy_rule_ref", ""),
                 event_description=detection["description"],
-                severity=severity.value,
+                severity=detection.get("severity", "MEDIUM"),
                 escalation_action=""
             )
             
-            # Escalate based on severity
+            # Classify severity
+            severity = severity_classifier.classify(detection)
+            event.severity = severity.value
+            
+            # Escalate
             event.escalation_action = await escalation_pipeline.process_event(event)
             
             # Save to database
@@ -85,17 +118,71 @@ async def analyze_video(file: UploadFile = File(...)):
             # Generate report
             await report_generator.generate_report(event)
             
-            # Send real-time alert for HIGH/CRITICAL
-            if severity in [SeverityLevel.HIGH, SeverityLevel.CRITICAL]:
-                await broadcast_alert(event)
-            
             events.append(event.dict())
+    
+    return JSONResponse({
+        "status": "success",
+        "processed": len(unsafe_videos),
+        "violations": len(events),
+        "events": events
+    })
+
+@app.post("/analyze-video")
+async def analyze_video(file: UploadFile = File(...)):
+    """Upload and analyze a single video file"""
+    try:
+        # Save uploaded video
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir) / file.filename
         
-        return JSONResponse({
-            "status": "success",
-            "events": events,
-            "total_violations": len(events)
-        })
+        with open(temp_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        # Process video
+        detection = await detection_engine.process_video_file(str(temp_path))
+        
+        # Clean up
+        shutil.rmtree(temp_dir)
+        
+        if detection.get("violation_detected", False):
+            # Create event
+            event = ViolationEvent(
+                event_id=str(uuid.uuid4()),
+                timestamp=datetime.utcnow().isoformat() + "Z",
+                clip_id=file.filename,
+                zone=detection.get("zone", "Unknown"),
+                behavior_class=detection["behavior_class"],
+                policy_rule_ref=detection.get("policy_rule_ref", ""),
+                event_description=detection["description"],
+                severity=detection.get("severity", "MEDIUM"),
+                escalation_action=""
+            )
+            
+            # Classify severity
+            severity = severity_classifier.classify(detection)
+            event.severity = severity.value
+            
+            # Escalate
+            event.escalation_action = await escalation_pipeline.process_event(event)
+            
+            # Save to database
+            await db.save_event(event)
+            
+            # Generate report
+            await report_generator.generate_report(event)
+            
+            return JSONResponse({
+                "status": "success",
+                "violation_detected": True,
+                "event": event.dict()
+            })
+        else:
+            return JSONResponse({
+                "status": "success",
+                "violation_detected": False,
+                "message": "No violation detected"
+            })
     
     except Exception as e:
         return JSONResponse({
@@ -115,7 +202,7 @@ async def websocket_endpoint(websocket: WebSocket):
         active_connections.remove(websocket)
 
 async def broadcast_alert(event: ViolationEvent):
-    """Broadcast alert to all connected WebSocket clients"""
+    """Broadcast alert to all connected clients"""
     for connection in active_connections:
         try:
             await connection.send_json(event.dict())
