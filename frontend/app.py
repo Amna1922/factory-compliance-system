@@ -4,6 +4,7 @@ import pandas as pd
 import json
 from datetime import datetime, timedelta
 import time
+from pathlib import Path
 
 # Configuration
 API_URL = "http://localhost:8000"
@@ -17,68 +18,150 @@ def main():
     
     st.title("🏭 Factory Compliance & Alert System")
     
-    # Sidebar for navigation
+    # Sidebar
     page = st.sidebar.selectbox(
         "Navigation",
-        ["Live Monitor", "Alert Timeline", "Historical Log", "Upload Video"]
+        ["Dataset Overview", "Live Monitor", "Batch Analysis", "Alert Timeline", "Historical Log"]
     )
     
-    if page == "Live Monitor":
+    if page == "Dataset Overview":
+        dataset_overview()
+    elif page == "Live Monitor":
         live_monitor()
+    elif page == "Batch Analysis":
+        batch_analysis()
     elif page == "Alert Timeline":
         alert_timeline()
     elif page == "Historical Log":
         historical_log()
-    elif page == "Upload Video":
-        upload_video()
+
+def dataset_overview():
+    st.header("📊 Dataset Overview")
+    
+    try:
+        response = requests.get(f"{API_URL}/dataset/stats")
+        if response.status_code == 200:
+            stats = response.json()
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Training Videos", stats["train"]["total"])
+            with col2:
+                st.metric("Total Test Videos", stats["test"]["total"])
+            with col3:
+                total_unsafe = stats["train"]["unsafe"] + stats["test"]["unsafe"]
+                st.metric("Total Unsafe Videos", total_unsafe)
+            
+            # Show class distribution
+            st.subheader("Class Distribution - Training Set")
+            train_classes = stats["train"].get("class_counts", {})
+            if train_classes:
+                df = pd.DataFrame({
+                    "Class": list(train_classes.keys()),
+                    "Count": list(train_classes.values())
+                })
+                st.bar_chart(df.set_index("Class"))
+            
+            st.subheader("Class Distribution - Test Set")
+            test_classes = stats["test"].get("class_counts", {})
+            if test_classes:
+                df = pd.DataFrame({
+                    "Class": list(test_classes.keys()),
+                    "Count": list(test_classes.values())
+                })
+                st.bar_chart(df.set_index("Class"))
+        else:
+            st.error("Failed to fetch dataset stats")
+    except Exception as e:
+        st.error(f"Error: {e}")
+        show_mock_stats()
+
+def batch_analysis():
+    st.header("🔍 Batch Analysis")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        split = st.selectbox("Dataset Split", ["train", "test"])
+    with col2:
+        max_videos = st.slider("Max Videos to Process", 1, 20, 5)
+    
+    if st.button("Run Batch Analysis"):
+        with st.spinner(f"Analyzing {max_videos} videos..."):
+            response = requests.post(
+                f"{API_URL}/analyze-batch",
+                params={"split": split, "max_videos": max_videos}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                st.success(f"✅ Analysis complete!")
+                st.metric("Violations Found", result.get("violations", 0))
+                st.metric("Videos Processed", result.get("processed", 0))
+                
+                if result.get("events"):
+                    st.subheader("Detected Violations")
+                    for event in result["events"][:10]:
+                        severity = event['severity']
+                        emoji = {
+                            "LOW": "🟢",
+                            "MEDIUM": "🟡",
+                            "HIGH": "🟠",
+                            "CRITICAL": "🔴"
+                        }.get(severity, "⚪")
+                        
+                        st.markdown(f"""
+                        {emoji} **{severity}** - {event['behavior_class']}
+                        - File: {event['clip_id']}
+                        - {event['event_description'][:100]}...
+                        """)
+            else:
+                st.error("Analysis failed")
 
 def live_monitor():
-    st.header("📹 Live Feed Monitor")
+    st.header("📹 Live Monitor")
     
-    # Placeholder for video feed
     col1, col2 = st.columns([3, 1])
     
     with col1:
         st.subheader("Video Feed")
-        # Placeholder for video
         st.image("https://via.placeholder.com/800x450.png?text=Live+Video+Feed", use_column_width=True)
     
     with col2:
         st.subheader("Compliance Status")
         
-        # Mock status indicators
-        st.markdown("### Active Alerts")
-        alert_placeholder = st.empty()
-        
-        # Simulate real-time updates
-        if st.button("Start Monitoring"):
-            for i in range(10):
-                # Simulate random events
-                severity = ["LOW", "MEDIUM", "HIGH", "CRITICAL"][i % 4]
-                color = {
-                    "LOW": "🟢",
-                    "MEDIUM": "🟡",
-                    "HIGH": "🟠",
-                    "CRITICAL": "🔴"
-                }[severity]
-                
-                alert_placeholder.markdown(f"""
-                {color} **{severity} ALERT** - Zone-{(i % 4) + 1}
-                Violation: {["Walkway", "Intervention", "Panel", "Forklift"][i % 4]}
-                Time: {datetime.now().strftime('%H:%M:%S')}
-                """)
-                time.sleep(1)
+        # Show recent alerts
+        try:
+            response = requests.get(f"{API_URL}/events")
+            if response.status_code == 200:
+                events = response.json().get("events", [])
+                if events:
+                    latest = events[0]
+                    severity = latest['severity']
+                    color = {
+                        "LOW": "🟢",
+                        "MEDIUM": "🟡",
+                        "HIGH": "🟠",
+                        "CRITICAL": "🔴"
+                    }.get(severity, "⚪")
+                    
+                    st.markdown(f"""
+                    ### Latest Alert
+                    {color} **{severity}** - {latest['behavior_class']}
+                    Time: {latest['timestamp'][:19]}
+                    """)
+        except:
+            pass
         
         # Mock stats
-        st.metric("Total Violations Today", "23")
         st.metric("Active Alerts", "2")
-        st.metric("Critical Alerts", "1")
+        st.metric("Today's Violations", "12")
 
 def alert_timeline():
     st.header("⏱️ Alert Timeline")
     
     # Filters
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         severity_filter = st.selectbox(
             "Severity",
@@ -90,13 +173,8 @@ def alert_timeline():
             ["All", "Safe Walkway Violation", "Unauthorized Intervention", 
              "Opened Panel Cover", "Carrying Overload with Forklift"]
         )
-    with col3:
-        time_range = st.selectbox(
-            "Time Range",
-            ["Last Hour", "Last 24 Hours", "Last 7 Days"]
-        )
     
-    # Fetch events from API
+    # Fetch events
     try:
         response = requests.get(f"{API_URL}/events")
         if response.status_code == 200:
@@ -141,36 +219,20 @@ def alert_timeline():
 def historical_log():
     st.header("📊 Historical Log")
     
-    # Filters
-    col1, col2, col3 = st.columns(3)
+    # Export options
+    col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("Start Date", datetime.now() - timedelta(days=7))
-    with col2:
-        end_date = st.date_input("End Date", datetime.now())
-    with col3:
         export_format = st.selectbox("Export Format", ["CSV", "JSON"])
-    
-    # Fetch and display events
-    try:
-        response = requests.get(f"{API_URL}/events")
-        if response.status_code == 200:
-            events = response.json().get("events", [])
-            
-            if events:
-                df = pd.DataFrame(events)
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                
-                # Filter by date
-                mask = (df['timestamp'] >= pd.Timestamp(start_date)) & (df['timestamp'] <= pd.Timestamp(end_date))
-                df_filtered = df.loc[mask]
-                
-                if not df_filtered.empty:
-                    st.dataframe(df_filtered)
-                    
-                    # Export button
-                    if st.button("Export"):
+    with col2:
+        if st.button("Export Log"):
+            try:
+                response = requests.get(f"{API_URL}/events")
+                if response.status_code == 200:
+                    events = response.json().get("events", [])
+                    if events:
+                        df = pd.DataFrame(events)
                         if export_format == "CSV":
-                            csv = df_filtered.to_csv(index=False)
+                            csv = df.to_csv(index=False)
                             st.download_button(
                                 label="Download CSV",
                                 data=csv,
@@ -178,62 +240,43 @@ def historical_log():
                                 mime="text/csv"
                             )
                         else:
-                            json_str = df_filtered.to_json(orient='records', indent=2)
+                            json_str = df.to_json(orient='records', indent=2)
                             st.download_button(
                                 label="Download JSON",
                                 data=json_str,
                                 file_name="compliance_log.json",
                                 mime="application/json"
                             )
-                else:
-                    st.info("No events in selected date range")
+                    else:
+                        st.warning("No events to export")
+            except:
+                st.error("Failed to export")
+    
+    # Display log
+    try:
+        response = requests.get(f"{API_URL}/events")
+        if response.status_code == 200:
+            events = response.json().get("events", [])
+            if events:
+                df = pd.DataFrame(events)
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                st.dataframe(df)
             else:
                 st.info("No events found")
         else:
             st.error("Failed to fetch events")
     except:
-        st.warning("Could not connect to API. Showing mock data.")
-        show_mock_history()
-
-def upload_video():
-    st.header("📤 Upload Video for Analysis")
-    
-    uploaded_file = st.file_uploader("Choose a video file", type=['mp4', 'avi', 'mov'])
-    
-    if uploaded_file is not None:
-        if st.button("Analyze Video"):
-            with st.spinner("Processing video..."):
-                # Upload to API
-                files = {"file": uploaded_file}
-                response = requests.post(f"{API_URL}/analyze-video", files=files)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    st.success(f"Analysis complete! Found {result['total_violations']} violations")
-                    
-                    # Display results
-                    for event in result['events']:
-                        severity = event['severity']
-                        color = {
-                            "LOW": "✅",
-                            "MEDIUM": "⚠️",
-                            "HIGH": "🚨",
-                            "CRITICAL": "🔥"
-                        }.get(severity, "ℹ️")
-                        
-                        st.markdown(f"""
-                        {color} **{severity}**: {event['behavior_class']}
-                        - {event['event_description'][:100]}...
-                        """)
-                else:
-                    st.error("Analysis failed")
+        st.warning("Could not connect to API")
 
 def show_mock_timeline():
     """Show mock timeline data"""
     mock_events = [
-        {"timestamp": datetime.now() - timedelta(minutes=5), "severity": "HIGH", "behavior_class": "Safe Walkway Violation", "event_description": "Person outside green markings"},
-        {"timestamp": datetime.now() - timedelta(minutes=12), "severity": "CRITICAL", "behavior_class": "Carrying Overload with Forklift", "event_description": "Forklift carrying 4 blocks"},
-        {"timestamp": datetime.now() - timedelta(minutes=23), "severity": "MEDIUM", "behavior_class": "Unauthorized Intervention", "event_description": "Person near equipment without green vest"},
+        {"timestamp": datetime.now() - timedelta(minutes=5), "severity": "HIGH", 
+         "behavior_class": "Safe Walkway Violation", "event_description": "Person outside green markings"},
+        {"timestamp": datetime.now() - timedelta(minutes=12), "severity": "CRITICAL", 
+         "behavior_class": "Carrying Overload with Forklift", "event_description": "Forklift carrying 4 blocks"},
+        {"timestamp": datetime.now() - timedelta(minutes=23), "severity": "MEDIUM", 
+         "behavior_class": "Unauthorized Intervention", "event_description": "Person near equipment without green vest"},
     ]
     
     for event in mock_events:
@@ -253,17 +296,15 @@ def show_mock_timeline():
         </div>
         """, unsafe_allow_html=True)
 
-def show_mock_history():
-    """Show mock historical data"""
-    mock_data = {
-        "Event ID": ["EVT001", "EVT002", "EVT003"],
-        "Timestamp": ["2026-01-15T10:30:00Z", "2026-01-15T10:15:00Z", "2026-01-15T09:45:00Z"],
-        "Zone": ["Zone-1", "Zone-2", "Zone-1"],
-        "Behavior": ["Walkway Violation", "Forklift Overload", "Panel Open"],
-        "Severity": ["HIGH", "CRITICAL", "LOW"]
-    }
-    df = pd.DataFrame(mock_data)
-    st.dataframe(df)
+def show_mock_stats():
+    """Show mock dataset statistics"""
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Videos", "1000+")
+    with col2:
+        st.metric("Unsafe Videos", "500+")
+    with col3:
+        st.metric("Safe Videos", "500+")
 
 if __name__ == "__main__":
     main()
