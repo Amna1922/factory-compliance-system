@@ -1,310 +1,361 @@
+"""
+Streamlit Dashboard for Factory Compliance & Alert Escalation System
+"""
 import streamlit as st
-import requests
 import pandas as pd
-import json
 from datetime import datetime, timedelta
 import time
-from pathlib import Path
+from frontend.components import DashboardComponents, APIClient
 
-# Configuration
-API_URL = "http://localhost:8000"
+# Page configuration
+st.set_page_config(
+    page_title="Compliance Dashboard",
+    page_icon="🏭",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-def main():
-    st.set_page_config(
-        page_title="Factory Compliance Dashboard",
-        page_icon="🏭",
-        layout="wide"
-    )
-    
-    st.title("🏭 Factory Compliance & Alert System")
-    
-    # Sidebar
-    page = st.sidebar.selectbox(
-        "Navigation",
-        ["Dataset Overview", "Live Monitor", "Batch Analysis", "Alert Timeline", "Historical Log"]
-    )
-    
-    if page == "Dataset Overview":
-        dataset_overview()
-    elif page == "Live Monitor":
-        live_monitor()
-    elif page == "Batch Analysis":
-        batch_analysis()
-    elif page == "Alert Timeline":
-        alert_timeline()
-    elif page == "Historical Log":
-        historical_log()
+# Custom CSS
+st.markdown("""
+<style>
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 10px 0;
+    }
+    .alert-critical {
+        background-color: #ff0000;
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+    }
+    .alert-high {
+        background-color: #ffa500;
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-def dataset_overview():
-    st.header("📊 Dataset Overview")
+# Page selector
+page = st.sidebar.radio(
+    "📊 Select View",
+    ["🏠 Dashboard Overview", "📹 Upload Video", "⚙️ Batch Analysis", "🔴 Alert Timeline", "📋 Historical Log"]
+)
+
+# ==================== PAGE: Dashboard Overview ====================
+if page == "🏠 Dashboard Overview":
+    st.title("🏭 Compliance System Dashboard")
     
-    try:
-        response = requests.get(f"{API_URL}/dataset/stats")
-        if response.status_code == 200:
-            stats = response.json()
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Training Videos", stats["train"]["total"])
-            with col2:
-                st.metric("Total Test Videos", stats["test"]["total"])
-            with col3:
-                total_unsafe = stats["train"]["unsafe"] + stats["test"]["unsafe"]
-                st.metric("Total Unsafe Videos", total_unsafe)
-            
-            # Show class distribution
-            st.subheader("Class Distribution - Training Set")
-            train_classes = stats["train"].get("class_counts", {})
-            if train_classes:
-                df = pd.DataFrame({
-                    "Class": list(train_classes.keys()),
-                    "Count": list(train_classes.values())
-                })
-                st.bar_chart(df.set_index("Class"))
-            
-            st.subheader("Class Distribution - Test Set")
-            test_classes = stats["test"].get("class_counts", {})
-            if test_classes:
-                df = pd.DataFrame({
-                    "Class": list(test_classes.keys()),
-                    "Count": list(test_classes.values())
-                })
-                st.bar_chart(df.set_index("Class"))
+    # Get system summary
+    summary = APIClient.get_system_summary()
+    
+    if summary:
+        # Display metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Total Videos",
+                summary["dataset"]["total_videos"],
+                f"Train: {summary['dataset']['train_videos']}, Test: {summary['dataset']['test_videos']}"
+            )
+        
+        with col2:
+            st.metric(
+                "Events (24h)",
+                summary["recent_events_24h"],
+                "Last 24 hours"
+            )
+        
+        with col3:
+            unsafe_count = summary["dataset"]["unsafe_count"]
+            safe_count = summary["dataset"]["safe_count"]
+            st.metric(
+                "Classes",
+                f"{unsafe_count} Unsafe",
+                f"{safe_count} Safe"
+            )
+        
+        with col4:
+            severity_stats = summary["event_severity_distribution"]
+            critical_count = severity_stats.get("CRITICAL", 0)
+            high_count = severity_stats.get("HIGH", 0)
+            st.metric(
+                "Critical/High",
+                critical_count + high_count,
+                "Requires attention"
+            )
+        
+        # Show event severity distribution
+        st.subheader("Event Distribution by Severity")
+        if summary["event_severity_distribution"]:
+            DashboardComponents.render_severity_chart(summary["event_severity_distribution"])
         else:
-            st.error("Failed to fetch dataset stats")
-    except Exception as e:
-        st.error(f"Error: {e}")
-        show_mock_stats()
+            st.info("No events recorded yet")
+        
+        # Show behavior class distribution
+        st.subheader("Dataset Distribution")
+        if summary["dataset"]["class_distribution"]:
+            DashboardComponents.render_class_distribution_chart(summary["dataset"]["class_distribution"])
+        else:
+            st.info("Dataset not available")
+        
+        # Recent events
+        st.subheader("Recent Events")
+        events = APIClient.get_events(filters={"limit": 10})
+        if events:
+            DashboardComponents.render_event_table(events)
+        else:
+            st.info("No recent events")
+    else:
+        st.error("Unable to connect to backend")
 
-def batch_analysis():
-    st.header("🔍 Batch Analysis")
+
+# ==================== PAGE: Upload Video ====================
+elif page == "📹 Upload Video":
+    st.title("📹 Upload & Analyze Video")
+    
+    st.markdown("Upload a video file for compliance violation detection")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        uploaded_file = st.file_uploader("Choose a video file", type=["mp4", "avi", "mov", "mkv"])
+    
+    with col2:
+        zone = st.text_input("Zone", value="Factory Floor A")
+    
+    if uploaded_file is not None:
+        if st.button("🔍 Analyze Video", use_container_width=True):
+            with st.spinner("Analyzing video..."):
+                result = APIClient.upload_video(uploaded_file, zone)
+                
+                if result:
+                    st.success("Video analyzed successfully!")
+                    
+                    # Display results
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Event ID", result.get("event_id", "N/A")[:15])
+                    
+                    with col2:
+                        severity = result.get("severity", "UNKNOWN")
+                        badge = DashboardComponents.render_severity_badge(severity)
+                        st.metric("Severity", f"{badge} {severity}")
+                    
+                    with col3:
+                        st.metric("Behavior", result.get("behavior_class", "Unknown")[:20])
+                    
+                    # Show detailed information
+                    st.subheader("Detection Details")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.info(f"**Clip ID**: {result.get('clip_id', 'N/A')}")
+                        st.info(f"**Zone**: {result.get('zone', 'N/A')}")
+                        st.info(f"**Policy Ref**: {result.get('policy_rule_ref', 'N/A')}")
+                    
+                    with col2:
+                        st.info(f"**Description**: {result.get('event_description', 'N/A')}")
+                        st.info(f"**Action**: {result.get('escalation_action', 'N/A')}")
+                        st.info(f"**Timestamp**: {result.get('timestamp', 'N/A')}")
+                    
+                    # Alert notification if needed
+                    if result.get("severity") in ["CRITICAL", "HIGH"]:
+                        st.warning(f"🚨 Real-time alert triggered!")
+                else:
+                    st.error("Failed to analyze video")
+
+
+# ==================== PAGE: Batch Analysis ====================
+elif page == "⚙️ Batch Analysis":
+    st.title("⚙️ Batch Analysis")
+    
+    st.markdown("Analyze multiple videos from the dataset")
     
     col1, col2 = st.columns(2)
-    with col1:
-        split = st.selectbox("Dataset Split", ["train", "test"])
-    with col2:
-        max_videos = st.slider("Max Videos to Process", 1, 20, 5)
     
-    if st.button("Run Batch Analysis"):
-        with st.spinner(f"Analyzing {max_videos} videos..."):
-            response = requests.post(
-                f"{API_URL}/analyze-batch",
-                params={"split": split, "max_videos": max_videos}
+    with col1:
+        dataset_type = st.radio("Select Dataset", ["train", "test"])
+    
+    with col2:
+        behaviors = st.multiselect(
+            "Select Behavior Classes (empty = all)",
+            options=[
+                "Safe Walkway Violation",
+                "Unauthorized Intervention",
+                "Opened Panel Cover",
+                "Carrying Overload with Forklift",
+                "Safe Walkway",
+                "Authorized Intervention",
+                "Closed Panel Cover"
+            ]
+        )
+    
+    if st.button("▶️ Start Batch Analysis", use_container_width=True):
+        with st.spinner("Processing batch... This may take a few minutes..."):
+            result = APIClient.analyze_batch(
+                dataset_type=dataset_type,
+                behavior_classes=behaviors if behaviors else None
             )
             
-            if response.status_code == 200:
-                result = response.json()
+            if result:
+                st.success(result.get("status", "Completed"))
                 
-                st.success(f"✅ Analysis complete!")
-                st.metric("Violations Found", result.get("violations", 0))
-                st.metric("Videos Processed", result.get("processed", 0))
+                col1, col2, col3 = st.columns(3)
                 
-                if result.get("events"):
-                    st.subheader("Detected Violations")
-                    for event in result["events"][:10]:
-                        severity = event['severity']
-                        emoji = {
-                            "LOW": "🟢",
-                            "MEDIUM": "🟡",
-                            "HIGH": "🟠",
-                            "CRITICAL": "🔴"
-                        }.get(severity, "⚪")
-                        
-                        st.markdown(f"""
-                        {emoji} **{severity}** - {event['behavior_class']}
-                        - File: {event['clip_id']}
-                        - {event['event_description'][:100]}...
-                        """)
+                with col1:
+                    st.metric("Videos Analyzed", result.get("total_videos_analyzed", 0))
+                
+                with col2:
+                    st.metric("Events Processed", result.get("events_processed", 0))
+                
+                with col3:
+                    st.metric("Alerts Triggered", result.get("alerts_triggered", 0))
+                
+                st.info(f"Analysis completed at {result.get('timestamp', 'N/A')}")
             else:
-                st.error("Analysis failed")
+                st.error("Batch analysis failed")
 
-def live_monitor():
-    st.header("📹 Live Monitor")
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        st.subheader("Video Feed")
-        st.image("https://via.placeholder.com/800x450.png?text=Live+Video+Feed", use_column_width=True)
-    
-    with col2:
-        st.subheader("Compliance Status")
-        
-        # Show recent alerts
-        try:
-            response = requests.get(f"{API_URL}/events")
-            if response.status_code == 200:
-                events = response.json().get("events", [])
-                if events:
-                    latest = events[0]
-                    severity = latest['severity']
-                    color = {
-                        "LOW": "🟢",
-                        "MEDIUM": "🟡",
-                        "HIGH": "🟠",
-                        "CRITICAL": "🔴"
-                    }.get(severity, "⚪")
-                    
-                    st.markdown(f"""
-                    ### Latest Alert
-                    {color} **{severity}** - {latest['behavior_class']}
-                    Time: {latest['timestamp'][:19]}
-                    """)
-        except:
-            pass
-        
-        # Mock stats
-        st.metric("Active Alerts", "2")
-        st.metric("Today's Violations", "12")
 
-def alert_timeline():
-    st.header("⏱️ Alert Timeline")
+# ==================== PAGE: Alert Timeline ====================
+elif page == "🔴 Alert Timeline":
+    st.title("🔴 Alert Timeline")
+    
+    st.markdown("View real-time compliance violation events with alert status")
     
     # Filters
-    col1, col2 = st.columns(2)
-    with col1:
-        severity_filter = st.selectbox(
-            "Severity",
-            ["All", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
-        )
-    with col2:
-        behavior_filter = st.selectbox(
-            "Behavior Class",
-            ["All", "Safe Walkway Violation", "Unauthorized Intervention", 
-             "Opened Panel Cover", "Carrying Overload with Forklift"]
-        )
+    filters = DashboardComponents.render_filter_section()
+    
+    # Get events
+    if st.button("🔄 Refresh Events", use_container_width=True):
+        st.rerun()
     
     # Fetch events
-    try:
-        response = requests.get(f"{API_URL}/events")
-        if response.status_code == 200:
-            events = response.json().get("events", [])
-            
-            if events:
-                df = pd.DataFrame(events)
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                df = df.sort_values('timestamp', ascending=False)
-                
-                # Apply filters
-                if severity_filter != "All":
-                    df = df[df['severity'] == severity_filter]
-                if behavior_filter != "All":
-                    df = df[df['behavior_class'] == behavior_filter]
-                
-                # Display as timeline
-                for _, row in df.iterrows():
-                    color = {
-                        "LOW": "#28a745",
-                        "MEDIUM": "#ffc107",
-                        "HIGH": "#fd7e14",
-                        "CRITICAL": "#dc3545"
-                    }.get(row['severity'], "#6c757d")
-                    
-                    st.markdown(f"""
-                    <div style="border-left: 4px solid {color}; padding: 10px; margin: 5px 0; background-color: #f8f9fa;">
-                        <strong>{row['timestamp'].strftime('%H:%M:%S')}</strong> - 
-                        <span style="color: {color}; font-weight: bold;">{row['severity']}</span> - 
-                        {row['behavior_class']}<br>
-                        <small>{row['event_description']}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("No events found")
-        else:
-            st.error("Failed to fetch events")
-    except:
-        st.warning("Could not connect to API. Showing mock data.")
-        show_mock_timeline()
-
-def historical_log():
-    st.header("📊 Historical Log")
+    severity_list = filters["severity"] if filters["severity"] else None
     
-    # Export options
-    col1, col2 = st.columns(2)
-    with col1:
-        export_format = st.selectbox("Export Format", ["CSV", "JSON"])
-    with col2:
-        if st.button("Export Log"):
-            try:
-                response = requests.get(f"{API_URL}/events")
-                if response.status_code == 200:
-                    events = response.json().get("events", [])
-                    if events:
-                        df = pd.DataFrame(events)
-                        if export_format == "CSV":
-                            csv = df.to_csv(index=False)
-                            st.download_button(
-                                label="Download CSV",
-                                data=csv,
-                                file_name="compliance_log.csv",
-                                mime="text/csv"
-                            )
-                        else:
-                            json_str = df.to_json(orient='records', indent=2)
-                            st.download_button(
-                                label="Download JSON",
-                                data=json_str,
-                                file_name="compliance_log.json",
-                                mime="application/json"
-                            )
-                    else:
-                        st.warning("No events to export")
-            except:
-                st.error("Failed to export")
+    # Build params
+    params = {
+        "limit": 100,
+    }
+    if filters["behavior_class"]:
+        params["behavior_class"] = filters["behavior_class"]
+    if filters["zone"]:
+        params["zone"] = filters["zone"]
+    if filters["start_date"]:
+        params["start_date"] = filters["start_date"]
+    if filters["end_date"]:
+        params["end_date"] = filters["end_date"]
     
-    # Display log
-    try:
-        response = requests.get(f"{API_URL}/events")
-        if response.status_code == 200:
-            events = response.json().get("events", [])
-            if events:
-                df = pd.DataFrame(events)
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                st.dataframe(df)
-            else:
-                st.info("No events found")
-        else:
-            st.error("Failed to fetch events")
-    except:
-        st.warning("Could not connect to API")
-
-def show_mock_timeline():
-    """Show mock timeline data"""
-    mock_events = [
-        {"timestamp": datetime.now() - timedelta(minutes=5), "severity": "HIGH", 
-         "behavior_class": "Safe Walkway Violation", "event_description": "Person outside green markings"},
-        {"timestamp": datetime.now() - timedelta(minutes=12), "severity": "CRITICAL", 
-         "behavior_class": "Carrying Overload with Forklift", "event_description": "Forklift carrying 4 blocks"},
-        {"timestamp": datetime.now() - timedelta(minutes=23), "severity": "MEDIUM", 
-         "behavior_class": "Unauthorized Intervention", "event_description": "Person near equipment without green vest"},
-    ]
+    events = APIClient.get_events(filters=params)
     
-    for event in mock_events:
-        color = {
-            "LOW": "#28a745",
-            "MEDIUM": "#ffc107",
-            "HIGH": "#fd7e14",
-            "CRITICAL": "#dc3545"
-        }.get(event['severity'], "#6c757d")
+    if events:
+        # Filter by severity if selected
+        if severity_list:
+            events = [e for e in events if e.get("severity") in severity_list]
         
-        st.markdown(f"""
-        <div style="border-left: 4px solid {color}; padding: 10px; margin: 5px 0; background-color: #f8f9fa;">
-            <strong>{event['timestamp'].strftime('%H:%M:%S')}</strong> - 
-            <span style="color: {color}; font-weight: bold;">{event['severity']}</span> - 
-            {event['behavior_class']}<br>
-            <small>{event['event_description']}</small>
-        </div>
-        """, unsafe_allow_html=True)
+        # Display timeline
+        st.subheader(f"Events Timeline ({len(events)} events)")
+        DashboardComponents.render_timeline_chart(events)
+        
+        # Display events
+        st.subheader("Event Details")
+        for event in events[:20]:  # Show max 20
+            DashboardComponents.render_alert_notification(event)
+    else:
+        st.info("No events found")
 
-def show_mock_stats():
-    """Show mock dataset statistics"""
+
+# ==================== PAGE: Historical Log ====================
+elif page == "📋 Historical Log":
+    st.title("📋 Historical Log")
+    
+    st.markdown("View and export compliance event history")
+    
+    # Filters
     col1, col2, col3 = st.columns(3)
+    
     with col1:
-        st.metric("Total Videos", "1000+")
+        severity_filter = st.multiselect(
+            "Severity Level",
+            options=["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+            default=[]
+        )
+    
     with col2:
-        st.metric("Unsafe Videos", "500+")
+        behavior_filter = st.text_input("Behavior Class")
+    
     with col3:
-        st.metric("Safe Videos", "500+")
+        limit = st.slider("Limit Results", 10, 1000, 100)
+    
+    # Fetch events
+    params = {"limit": limit}
+    
+    if severity_filter:
+        # Fetch all and filter client-side
+        params["limit"] = 1000
+    
+    events = APIClient.get_events(filters=params)
+    
+    if events:
+        # Client-side filtering
+        if severity_filter:
+            events = [e for e in events if e.get("severity") in severity_filter]
+        if behavior_filter:
+            events = [e for e in events if behavior_filter.lower() in e.get("behavior_class", "").lower()]
+        
+        events = events[:limit]
+        
+        # Display table
+        st.subheader(f"Events ({len(events)} total)")
+        DashboardComponents.render_event_table(events)
+        
+        # Export button
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📥 Export as CSV", use_container_width=True):
+                csv_data = APIClient.export_csv(
+                    severity=severity_filter[0] if severity_filter else None,
+                    behavior_class=behavior_filter or None
+                )
+                if csv_data:
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv_data,
+                        file_name=f"compliance_events_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+        
+        with col2:
+            st.info(f"Total events in database: ~{len(events)}")
+    else:
+        st.info("No events found in historical log")
 
-if __name__ == "__main__":
-    main()
+
+# Sidebar info
+st.sidebar.markdown("---")
+st.sidebar.markdown("""
+### 🏭 Compliance System
+**Version**: 1.0.0
+**Status**: Active
+
+#### Features
+- ✅ Real-time violation detection
+- ✅ Policy-based severity classification
+- ✅ Automated alert escalation
+- ✅ Complete audit trail
+
+#### Quick Stats
+- 🎥 Dataset: Available
+- 🗄️ Database: Connected
+- 🔌 API: Running
+- 📡 WebSocket: Active
+""")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("📞 Support: contact@compliance-system.local")
