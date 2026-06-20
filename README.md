@@ -330,16 +330,8 @@ curl "http://localhost:8000/export/csv?severity=CRITICAL" > events.csv
 - Check firewall settings
 - Verify CORS is enabled (it is by default)
 
-### Database errors
 
-- Delete `compliance.db` to reset
-- Check write permissions in project directory
 
-### Dataset not found
-
-- Verify dataset structure matches expected format
-- Check dataset path in `app/config.py`
-- Ensure .mp4 files are present
 
 ## Performance Notes
 
@@ -349,24 +341,7 @@ curl "http://localhost:8000/export/csv?severity=CRITICAL" > events.csv
 - Database queries are indexed by event_id, timestamp, severity
 - CSV exports limited to 10,000 events for performance
 
-## Security Considerations
 
-- Database file is SQLite (not for production use)
-- No authentication implemented (add for production)
-- CORS allows all origins (restrict for production)
-- API endpoints have no rate limiting (add for production)
-- Reports are stored as files (use secure storage for production)
-
-## Future Enhancements
-
-- [ ] ML-based behavior detection
-- [ ] User authentication and role-based access
-- [ ] Advanced analytics and reporting
-- [ ] Integration with external alert systems
-- [ ] Mobile app for alerts
-- [ ] Video archive and playback
-- [ ] Custom severity rules configuration
-- [ ] Multi-zone support with heatmaps
 
 ## Testing
 
@@ -385,22 +360,6 @@ For issues or questions:
 2. Review API documentation at `/docs`
 3. Check system status at `/health`
 
-## License
 
-Copyright 2024 - All Rights Reserved
 
-## Version History
 
-### v1.0.0 (Current)
-
-- Initial release
-- All 5 modules implemented
-- Complete dashboard
-- Full API with WebSocket support
-- Report generation
-- SQLite database
-
----
-
-**System Status**: ✅ Fully Operational
-**Last Updated**: 2024-01-15
