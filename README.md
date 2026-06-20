@@ -14,6 +14,10 @@ This system provides:
 - **REST API**: FastAPI backend with WebSocket support for real-time alerts
 - **Complete Audit Trail**: Immutable records of all compliance events
 
+## Demo video walkthrough 
+
+https://drive.google.com/file/d/1T5z2eEgdkYUxRPIh3uQN8RUvS3xv-HKr/view?usp=sharing
+
 ## Architecture
 
 ### Module 1: Detection Engine
