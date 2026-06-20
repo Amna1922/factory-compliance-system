@@ -5,3 +5,7 @@
 *.pdf
 
 *.zip
+*.json
+*.db
+*log
+*.csv
